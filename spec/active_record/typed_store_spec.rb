@@ -990,3 +990,39 @@ describe DirtyTrackingModel do
     expect(model.active).to be true
   end
 end
+
+describe 'attribute methods generated from concurrent threads' do
+  let(:model_class) do
+    stub_const('ConcurrentTypedStoreModel', Class.new(ActiveRecord::Base)).class_eval do
+      self.table_name = 'json_typed_store_models'
+      establish_connection :test_sqlite3
+
+      typed_store(:settings, coder: ColumnCoder.new(JSON)) { |s| s.string :nickname, default: 'Please enter your nickname' }
+
+      def self.method_defined?(name, inherit = true)
+        defined = super
+        sleep 0.05 if defined && name.to_s == 'nickname_before_type_cast'
+        defined
+      end
+
+      self
+    end
+  end
+
+  it 'reads the store accessor in every thread' do
+    nicknames = Queue.new
+    errors = Queue.new
+
+    4.times.map do
+      Thread.new do
+        nicknames << model_class.new.nickname
+      rescue NameError => error
+        errors << error.message
+      end
+    end.each(&:join)
+
+    expect(Array.new(errors.size) { errors.pop }).to be_empty
+    expect(Array.new(nicknames.size) { nicknames.pop }).to eq(['Please enter your nickname'] * 4)
+    expect(model_class.new).to_not respond_to :nickname_before_type_cast
+  end
+end

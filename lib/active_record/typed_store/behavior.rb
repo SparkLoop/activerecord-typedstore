@@ -19,15 +19,20 @@ module ActiveRecord::TypedStore
         return if @typed_store_attribute_methods_generated
         store_accessors.each do |attribute|
           define_attribute_method(attribute)
-          undefine_before_type_cast_method(attribute)
         end
         @typed_store_attribute_methods_generated = true
       end
 
-      def undefine_before_type_cast_method(attribute)
-        # because it mess with ActionView forms, see #14.
-        method = "#{attribute}_before_type_cast"
-        undef_method(method) if method_defined?(method)
+      # A generated `<accessor>_before_type_cast` reads a column that does not exist and
+      # breaks ActionView form values (#14). Skip generating it rather than undefining it
+      # afterwards, which raised NameError when two threads generated methods at once (#105).
+      def instance_method_already_implemented?(method_name)
+        name = method_name.to_s
+        if name.end_with?("_before_type_cast") && store_accessors.include?(name.delete_suffix("_before_type_cast"))
+          return true
+        end
+
+        super
       end
     end
 
